@@ -46,10 +46,12 @@ jobs:
           site="$SITE"
           [ "$SIMULAR" = "true" ] && site="https://teste-da-vigia.invalid"
           conferir() {
+            rm -f saude.json whats.json
             saude=$(curl -s --max-time 25 -o saude.json -w '%{http_code}' "$site/health" || echo 000)
             whats=$(curl -s --max-time 25 -o whats.json -w '%{http_code}' "$site/" || echo 000)
             estado_wa=$(jq -r '.whatsapp // "sem resposta"' whats.json 2>/dev/null || echo "sem resposta")
-            db=$(jq -r '.checks.db' saude.json 2>/dev/null); redis=$(jq -r '.checks.redis' saude.json 2>/dev/null)
+            db=$(jq -r '.checks.db' saude.json 2>/dev/null || echo "sem resposta")
+            redis=$(jq -r '.checks.redis' saude.json 2>/dev/null || echo "sem resposta")
             problema=""
             if [ "$saude" != "200" ] || [ "$db" != "true" ] || [ "$redis" != "true" ]; then
               problema="SERVIDOR DA MAYA FORA (Railway). Resposta HTTP $saude, banco=$db, redis=$redis. Clientes não recebem resposta e o painel não abre."
