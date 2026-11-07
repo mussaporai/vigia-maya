@@ -1,5 +1,11 @@
 # Vigia da Maya
 
+**Vigia principal (desde 07/11/2026): Cloudflare Worker `vigia-maya`** (`cloudflare/`), a cada 5 minutos, com notificação no celular do dono pelo app **ntfy** (canal guardado como segredo `NTFY_TOPICO` na Cloudflare). Avisa quando cai, reavisa a cada 2 h e avisa quando volta. Teste: `https://vigia-maya.mussa-por-ai.workers.dev/teste?chave=<CHAVE_TESTE>&simular=1`. Última conferência: chave `ultima_conferencia` no KV `VIGIA_MAYA`.
+
+O agendamento do GitHub abaixo fica só de reserva: nesta conta ele atrasa horas ou nem roda.
+
+## Reserva no GitHub Actions
+
 Confere a cada 10 minutos, de fora, se a Maya (agente de WhatsApp da Level UP) está no ar:
 
 - **Servidor** (Railway): `https://orcamentos.levelupvideo.com.br/health` precisa responder 200 com banco e Redis ok.

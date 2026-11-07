@@ -1,0 +1,13 @@
+name = "vigia-maya"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[kv_namespaces]]
+binding = "VIGIA_MAYA"
+id = "18258a51640944879d871827bf4a2b98"
+
+[observability]
+enabled = true
