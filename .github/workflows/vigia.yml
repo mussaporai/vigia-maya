@@ -1,0 +1,122 @@
+# Vigia da Maya: a cada 10 minutos confere, de fora, se o servidor da Maya
+# (Railway) responde e se o WhatsApp dela (Evolution API) está conectado.
+# Não depende da Railway nem da Evolution para avisar: quando algo cai, este
+# job FALHA e o GitHub manda e-mail ao dono. Enquanto continuar fora, avisa de
+# novo a cada 2 horas. Quando volta, a própria Maya avisa no grupo da equipe.
+# Não usa senha nem chave: só abre as duas páginas públicas de saúde.
+name: Vigia da Maya
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      simular_queda:
+        description: "Teste: finge que a Maya caiu (não mexe na produção)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: vigia-maya
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # só para o "mantém vivo" mensal (ver último passo)
+
+jobs:
+  vigiar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SITE: https://orcamentos.levelupvideo.com.br
+      REAVISO_MIN: 120
+    steps:
+      - name: Lembrar o último estado
+        uses: actions/cache/restore@v4
+        with:
+          path: estado.txt
+          key: estado-${{ github.run_id }}
+          restore-keys: estado-
+
+      - name: Conferir servidor e WhatsApp
+        id: conferir
+        env:
+          SIMULAR: ${{ inputs.simular_queda == true && github.event_name == 'workflow_dispatch' }}
+        run: |
+          site="$SITE"
+          [ "$SIMULAR" = "true" ] && site="https://teste-da-vigia.invalid"
+          conferir() {
+            saude=$(curl -s --max-time 25 -o saude.json -w '%{http_code}' "$site/health" || echo 000)
+            whats=$(curl -s --max-time 25 -o whats.json -w '%{http_code}' "$site/" || echo 000)
+            estado_wa=$(jq -r '.whatsapp // "sem resposta"' whats.json 2>/dev/null || echo "sem resposta")
+            db=$(jq -r '.checks.db' saude.json 2>/dev/null); redis=$(jq -r '.checks.redis' saude.json 2>/dev/null)
+            problema=""
+            if [ "$saude" != "200" ] || [ "$db" != "true" ] || [ "$redis" != "true" ]; then
+              problema="SERVIDOR DA MAYA FORA (Railway). Resposta HTTP $saude, banco=$db, redis=$redis. Clientes não recebem resposta e o painel não abre."
+            elif [ "$estado_wa" = "sem resposta" ] || [ "$estado_wa" = "null" ]; then
+              problema="WHATSAPP DA MAYA SEM RESPOSTA: o servidor da Evolution (Cloudfy) não respondeu. Clientes não recebem resposta."
+            elif [ "$estado_wa" != "open" ]; then
+              problema="WHATSAPP DA MAYA DESCONECTADO (estado: $estado_wa). Para voltar: abrir o painel da Evolution, instância Level, e ler o QR Code com o celular da Level UP."
+            fi
+          }
+          conferir
+          if [ -n "$problema" ]; then
+            echo "Primeira conferência falhou, confirmando em 60 s: $problema"
+            sleep 60
+            conferir
+          fi
+          echo "Servidor: HTTP $saude (banco=$db, redis=$redis) | WhatsApp: $estado_wa"
+          echo "problema=$problema" >> "$GITHUB_OUTPUT"
+
+      - name: Decidir se avisa
+        id: decidir
+        env:
+          PROBLEMA: ${{ steps.conferir.outputs.problema }}
+        run: |
+          agora=$(date +%s)
+          anterior=$(cat estado.txt 2>/dev/null || echo "ok")
+          avisar=nao
+          if [ -z "$PROBLEMA" ]; then
+            [ "$anterior" != "ok" ] && echo "Maya voltou ao normal."
+            echo "ok" > estado.txt
+          else
+            ultimo=$(echo "$anterior" | awk '/^fora/{print $2}')
+            if [ -z "$ultimo" ] || [ $(( (agora - ultimo) / 60 )) -ge "$REAVISO_MIN" ]; then
+              avisar=sim; echo "fora $agora" > estado.txt
+            else
+              echo "Continua fora; já avisado há $(( (agora - ultimo) / 60 )) min (reaviso a cada $REAVISO_MIN min)."
+              echo "$anterior" > estado.txt
+            fi
+          fi
+          echo "avisar=$avisar" >> "$GITHUB_OUTPUT"
+
+      - name: Guardar o estado
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: estado.txt
+          key: estado-${{ github.run_id }}
+
+      - name: Avisar o dono (o GitHub manda e-mail quando este passo falha)
+        if: steps.decidir.outputs.avisar == 'sim'
+        env:
+          PROBLEMA: ${{ steps.conferir.outputs.problema }}
+        run: |
+          echo "::error title=Maya fora do ar::$PROBLEMA"
+          exit 1
+
+      # O GitHub desliga agendamentos de repositório público sem atividade há
+      # 60 dias. Uma vez por mês grava um commit vazio para manter a vigia viva.
+      - name: Mantém vivo (mensal)
+        if: success() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          data=$(gh api "repos/${{ github.repository }}/commits?per_page=1" --jq '.[0].commit.committer.date')
+          ultimo=$(date -d "$data" +%s)
+          if [ $(( ($(date +%s) - ultimo) / 86400 )) -ge 30 ]; then
+            git clone -q --depth 1 "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" repo
+            cd repo
+            git -c user.name="vigia" -c user.email="vigia@users.noreply.github.com" commit -q --allow-empty -m "vigia: mantém o agendamento ativo"
+            git push -q
+          fi
