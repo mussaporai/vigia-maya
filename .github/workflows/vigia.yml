@@ -8,7 +8,8 @@ name: Vigia da Maya
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Minutos 04, 14, 24... (minuto redondo é congestionado e o GitHub descarta)
+    - cron: "4-59/10 * * * *"
   workflow_dispatch:
     inputs:
       simular_queda:
